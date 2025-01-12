@@ -1,0 +1,51 @@
+# Node.js / Vite-related
+node_modules/
+dist/
+.vite/
+*.log
+
+# Build artifacts
+*.tgz
+*.zip
+*.tar.gz
+package-lock.json
+yarn.lock
+
+# TypeScript (if using TypeScript with Vite)
+*.tsbuildinfo
+
+# npm-debug.log, yarn-error.log, and other logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE and Editor settings (optional but often useful to ignore)
+.vscode/
+.idea/
+
+# Maven-related
+# Build output directory
+target/
+
+# Eclipse, IntelliJ, or NetBeans IDE configuration files
+.project
+.classpath
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# OS-specific files (macOS, Windows)
+.DS_Store
+Thumbs.db
+
+# Java package cache
+*.class
+*.jar
+*.war
+*.ear
+
+# Temporary files
+*.log
+*.bak
+*.swp
