@@ -6,19 +6,23 @@ import java.nio.file.*;
 import java.util.regex.*;
 import java.util.stream.Collectors;
 
+import org.springframework.stereotype.Component;
+
+@Component
 public class StrutsFunctionAnalyzer {
-    private Map<String, Set<String>> functionCalls = new HashMap<>();
+    private final Map<String, Set<String>> functionCalls = new HashMap<>();
     private Set<String> projectPackages = new HashSet<>();
     private Set<String> blacklistedMethods = new HashSet<>();
-    private Pattern actionPattern = Pattern.compile("public\\s+(?:class|interface)\\s+(\\w+)Action");
-    private Pattern methodPattern = Pattern.compile("(?:public|protected|private)?\\s+(?:static\\s+)?(?:[\\w.<>\\[\\]]+\\s+)?(\\w+)\\s*\\([^)]*\\)");
-    private Pattern methodCallPattern = Pattern.compile("(\\w+)\\s*\\([^)]*\\)");
-    private Pattern packagePattern = Pattern.compile("package\\s+([\\w.]+);");
-    private Pattern importPattern = Pattern.compile("import\\s+([\\w.]+\\*?);");
+    private final Pattern actionPattern = Pattern.compile("public\\s+(?:class|interface)\\s+(\\w+)Action");
+    private final Pattern methodPattern = Pattern.compile("(?:public|protected|private)?\\s+(?:static\\s+)?(?:[\\w.<>\\[\\]]+\\s+)?(\\w+)\\s*\\([^)]*\\)");
+    private final Pattern classNamePattern = Pattern.compile("public\\s+(?:class|interface)\\s+(\\w+)(?:Action)?");
+    private final Pattern methodCallPattern = Pattern.compile("(\\w+)\\s*\\([^)]*\\)");
+    private final Pattern packagePattern = Pattern.compile("package\\s+([\\w.]+);");
+    private final Pattern importPattern = Pattern.compile("import\\s+([\\w.]+\\*?);");
     private Map<String, PackageMetadata> packageMetadata = new HashMap<>();
     private Map<String, ClassMetadata> classMetadata = new HashMap<>();
-    private Pattern annotationPattern = Pattern.compile("@(\\w+)(?:\\([^)]*\\))?");
-    private Pattern classPattern = Pattern.compile("(?:public|protected|private)?\\s+(?:abstract\\s+)?class\\s+(\\w+)(?:\\s+extends\\s+(\\w+))?(?:\\s+implements\\s+([^{]+))?");
+    private final Pattern annotationPattern = Pattern.compile("@(\\w+)(?:\\([^)]*\\))?");
+    private final Pattern classPattern = Pattern.compile("(?:public|protected|private)?\\s+(?:abstract\\s+)?class\\s+(\\w+)(?:\\s+extends\\s+(\\w+))?(?:\\s+implements\\s+([^{]+))?");
     private Map<String, NodeData> nodesMap = new HashMap<>();  // Store all method nodes
 
 
@@ -41,16 +45,29 @@ public class StrutsFunctionAnalyzer {
     }
 
     public void analyzeDirectory(String directoryPath) throws IOException {
+
+        Path path = Paths.get(directoryPath);
+
+        // Check if directory exists before trying to walk it
+        if (!Files.exists(path)) {
+            throw new IOException("No such directory exists: " + directoryPath);
+        }
+
+        // Check if it's actually a directory
+        if (!Files.isDirectory(path)) {
+            throw new IOException("Path is not a directory: " + directoryPath);
+        }
+
         // First pass: collect all project packages
-        Files.walk(Paths.get(directoryPath))
+        Files.walk(path)
             .filter(Files::isRegularFile)
-            .filter(path -> path.toString().endsWith(".java"))
+            .filter(p -> p.toString().endsWith(".java"))
             .forEach(this::collectPackage);
 
         // Second pass: analyze function calls
-        Files.walk(Paths.get(directoryPath))
+        Files.walk(path)
             .filter(Files::isRegularFile)
-            .filter(path -> path.toString().endsWith(".java"))
+            .filter(p -> p.toString().endsWith(".java"))
             .forEach(this::analyzeFile);
     }
 
@@ -72,24 +89,29 @@ public class StrutsFunctionAnalyzer {
             String content = new String(Files.readAllBytes(filePath));
             String currentPackage = extractPackage(content);
             String currentClass = extractClassName(content);
+
             Set<String> imports = extractImports(content);
 
-            if (currentClass != null && currentPackage != null) {
-                String fullClassName = currentPackage + "." + currentClass;
+            if (currentClass != null) {
+                String fullClassName = currentPackage != null ? currentPackage + "." + currentClass : currentClass;
 
                 // Create or update package metadata
-                packageMetadata.putIfAbsent(currentPackage, new PackageMetadata(currentPackage));
-                PackageMetadata pkg = packageMetadata.get(currentPackage);
-                pkg.totalClasses++;
+                PackageMetadata pkg = null;
+                if (currentPackage != null) {
+                    packageMetadata.putIfAbsent(currentPackage, new PackageMetadata(currentPackage));
+                    pkg = packageMetadata.get(currentPackage);
+                    pkg.totalClasses++;
+                }
 
                 // Create or update class metadata
-                ClassMetadata classData = new ClassMetadata(currentClass, currentPackage);
+                ClassMetadata classData = new ClassMetadata(currentClass, currentPackage != null ? currentPackage : "");
                 classData.isAction = currentClass.endsWith("Action");
                 extractClassMetadata(content, classData);
                 classMetadata.put(fullClassName, classData);
 
                 // Analyze methods
                 Matcher methodMatcher = methodPattern.matcher(content);
+                System.out.println(blacklistedMethods.toString());
                 while (methodMatcher.find()) {
                     String methodName = methodMatcher.group(1);
                     String fullMethodName = fullClassName + "." + methodName;
@@ -104,7 +126,10 @@ public class StrutsFunctionAnalyzer {
                         functionCalls.putIfAbsent(fullMethodName, new HashSet<>());
                         nodesMap.putIfAbsent(fullMethodName, nodeData);
 
-                        pkg.totalMethods++;
+                        // Only increment totalMethods if we have a valid package
+                        if (pkg != null) {
+                            pkg.totalMethods++;
+                        }
 
                         String methodBody = extractMethodBody(content, methodMatcher.start());
                         analyzeMethodCalls(fullMethodName, methodBody, imports, currentPackage);
@@ -113,7 +138,6 @@ public class StrutsFunctionAnalyzer {
             }
         } catch (IOException e) {
             System.err.println("Error analyzing file: " + filePath);
-            e.printStackTrace();
         }
     }
 
@@ -216,7 +240,7 @@ public class StrutsFunctionAnalyzer {
     }
 
     private String extractClassName(String content) {
-        Matcher matcher = actionPattern.matcher(content);
+       Matcher matcher = actionPattern.matcher(content);
         return matcher.find() ? matcher.group(1) : null;
     }
 
@@ -249,8 +273,8 @@ public class StrutsFunctionAnalyzer {
     }
 
     private boolean isUtilityMethod(String methodName) {
-        return methodName.startsWith("get") || 
-               methodName.startsWith("set") || 
+        return methodName.startsWith("get") ||
+               methodName.startsWith("set") ||
                methodName.startsWith("is");
     }
 
@@ -383,7 +407,7 @@ public class StrutsFunctionAnalyzer {
                 .collect(Collectors.joining(", ", "[", "]"));
     }
 
-    
+
     private String escapeJson(String text) {
         return text.replace("\\", "\\\\")
                   .replace("\"", "\\\"")
@@ -391,7 +415,10 @@ public class StrutsFunctionAnalyzer {
                   .replace("\r", "\\r")
                   .replace("\t", "\\t");
     }
-    
+
+    public void setBlacklist(Set<String> blacklist) {
+        this.blacklistedMethods = blacklist;
+    }
     // Inner class to hold node data
     private static class NodeData {
         String id;
@@ -406,12 +433,12 @@ public class StrutsFunctionAnalyzer {
         AccessLevel accessLevel;
         boolean isStatic;
         Set<String> annotations = new HashSet<>();
-        
+
         NodeData(String id) {
             this.id = id;
             parseIdentifiers();
         }
-        
+
         private void parseIdentifiers() {
             String[] parts = id.split("\\.");
             if (parts.length >= 2) {
@@ -477,7 +504,6 @@ public class StrutsFunctionAnalyzer {
             
         } catch (IOException e) {
             System.err.println("Error analyzing directory: " + args[0]);
-            e.printStackTrace();
         }
     }
 }
